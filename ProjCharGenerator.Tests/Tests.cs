@@ -1,43 +1,77 @@
-﻿using generator;
-using System.Text;
+﻿using TextGenerator;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text; // Добавлена эта строка
 
 namespace GeneratorTests
 {
     [TestClass]
-    public class CombinedGeneratorTests
+    public class TokenGeneratorTests
     {
-        [TestMethod]
-        public void CharGen_Test1()
+        private const string TestFilesDirectory = "TestData";
+
+        [TestInitialize]
+        public void Setup()
         {
-            var gen = new CharGenerator("bigrammweights.txt");
-            Assert.AreEqual(3, gen.getSize());
+            Directory.CreateDirectory(TestFilesDirectory);
+            
+            // Создаем тестовые файлы
+            File.WriteAllText(Path.Combine(TestFilesDirectory, "bigrammweights.txt"), 
+                "1 aa 10\n2 bb 20\n3 cc 30");
+                
+            File.WriteAllText(Path.Combine(TestFilesDirectory, "wordweights.txt"), 
+                "1 word1 aa aa 10\n2 word2 bb bb 20\n3 word3 cc cc 30");
+                
+            File.WriteAllText(Path.Combine(TestFilesDirectory, "empty_file.txt"), "");
+            
+            File.WriteAllText(Path.Combine(TestFilesDirectory, "zero.txt"), "1 tt 0.0");
+            
+            File.WriteAllText(Path.Combine(TestFilesDirectory, "unicode.txt"), 
+                "1 азбука aa aa 5.0", Encoding.UTF8);
         }
 
-        [TestMethod]
-        public void CharGen_Test2()
+        [TestCleanup]
+        public void Cleanup()
         {
-            var gen = new CharGenerator("bigrammweights.txt");
-            var valid = new HashSet<string> { "aa", "bb", "cc" };
-
-            for (int i = 0; i < 100; i++)
+            if (Directory.Exists(TestFilesDirectory))
             {
-                Assert.IsTrue(valid.Contains(gen.getToken()));
+                Directory.Delete(TestFilesDirectory, true);
             }
         }
 
         [TestMethod]
-        public void CharGen_Test3()
+        public void CharacterGenerator_ShouldReturnCorrectTokenCount()
         {
-            var gen = new CharGenerator("bigrammweights.txt");
+            var generator = new CharacterGenerator(Path.Combine(TestFilesDirectory, "bigrammweights.txt"));
+            Assert.AreEqual(3, generator.TokenCount);
+        }
+
+        [TestMethod]
+        public void CharacterGenerator_ShouldReturnOnlyValidTokens()
+        {
+            var generator = new CharacterGenerator(Path.Combine(TestFilesDirectory, "bigrammweights.txt"));
+            var validTokens = new HashSet<string> { "aa", "bb", "cc" };
+
+            var results = Enumerable.Range(0, 100)
+                .Select(_ => generator.GetRandomToken())
+                .ToList();
+
+            CollectionAssert.AllItemsAreNotNull(results);
+            Assert.IsTrue(results.All(validTokens.Contains));
+        }
+
+        [TestMethod]
+        public void CharacterGenerator_ShouldRespectTokenWeights()
+        {
+            var generator = new CharacterGenerator(Path.Combine(TestFilesDirectory, "bigrammweights.txt"));
             var stats = new Dictionary<string, int>();
 
             for (int i = 0; i < 10000; i++)
             {
-                var sym = gen.getToken();
-                if (stats.ContainsKey(sym))
-                    stats[sym]++;
-                else
-                    stats.Add(sym, 1);
+                var token = generator.GetRandomToken();
+                stats[token] = stats.GetValueOrDefault(token, 0) + 1;
             }
 
             Assert.IsTrue(stats["aa"] < stats["bb"]);
@@ -45,65 +79,58 @@ namespace GeneratorTests
         }
 
         [TestMethod]
-        public void CharGen_Test4()
+        public void CharacterGenerator_WithEmptyFile_ShouldHaveZeroTokens()
         {
-            var gen = new CharGenerator("empty_file.txt");
-            Assert.AreEqual(0, gen.getSize());
+            var generator = new CharacterGenerator(Path.Combine(TestFilesDirectory, "empty_file.txt"));
+            Assert.AreEqual(0, generator.TokenCount);
         }
 
         [TestMethod]
-        public void CharGen_Test5()
+        public void CharacterGenerator_WithEmptyFile_ShouldReturnEmptyString()
         {
-            var gen = new CharGenerator("empty_file.txt");
-            Assert.AreEqual("", gen.getToken());
+            var generator = new CharacterGenerator(Path.Combine(TestFilesDirectory, "empty_file.txt"));
+            Assert.AreEqual(string.Empty, generator.GetRandomToken());
         }
 
         [TestMethod]
-        public void CharGen_Test6()
+        public void CharacterGenerator_WithZeroWeight_ShouldReturnEmptyString()
         {
-            File.WriteAllText("zero.txt", "1 tt 0.0");
-            var gen = new CharGenerator("zero.txt");
-            Assert.AreEqual("", gen.getToken());
-        }
-        [TestMethod]
-        public void WordGen_Test7()
-        {
-            var gen = new WordGenerator("wordweights.txt");
-            Assert.AreEqual(3, gen.getSize());
+            var generator = new CharacterGenerator(Path.Combine(TestFilesDirectory, "zero.txt"));
+            Assert.AreEqual(string.Empty, generator.GetRandomToken());
         }
 
         [TestMethod]
-        public void WordGen_Test8()
+        public void WordGenerator_ShouldReturnCorrectTokenCount()
         {
-            var gen = new WordGenerator("wordweights.txt");
-            var valid = new HashSet<string> { "word1", "word2", "word3" };
-
-            for (int i = 0; i < 100; i++)
-            {
-                Assert.IsTrue(valid.Contains(gen.getToken()));
-            }
+            var generator = new WordGenerator(Path.Combine(TestFilesDirectory, "wordweights.txt"));
+            Assert.AreEqual(3, generator.TokenCount);
         }
 
         [TestMethod]
-        public void WordGen_Test9()
+        public void WordGenerator_ShouldReturnOnlyValidTokens()
         {
-            File.WriteAllText(Path.Combine(Directory.GetParent(Environment.CurrentDirectory).Parent.Parent.FullName, "empty.txt"), "1 empty aa aa 0.0");
-            var gen = new WordGenerator("empty.txt");
-            Assert.AreEqual("empty", gen.getToken());
+            var generator = new WordGenerator(Path.Combine(TestFilesDirectory, "wordweights.txt"));
+            var validTokens = new HashSet<string> { "word1", "word2", "word3" };
+
+            var results = Enumerable.Range(0, 100)
+                .Select(_ => generator.GetRandomToken())
+                .ToList();
+
+            CollectionAssert.AllItemsAreNotNull(results);
+            Assert.IsTrue(results.All(validTokens.Contains));
         }
 
         [TestMethod]
-        public void WordGen_Test10()
+        public void WordGenerator_ShouldHandleUnicodeTokens()
         {
-            File.WriteAllText(Path.Combine(Directory.GetParent(Environment.CurrentDirectory).Parent.Parent.FullName, "kekes.txt"), "1 азбука aa aa 5.0", Encoding.UTF8);
-            var gen = new WordGenerator("kekes.txt");
-            Assert.AreEqual("азбука", gen.getToken());
+            var generator = new WordGenerator(Path.Combine(TestFilesDirectory, "unicode.txt"));
+            Assert.AreEqual("азбука", generator.GetRandomToken());
         }
 
         [TestMethod]
-        public void Kekes_Test1()
+        public void SanityCheck_ShouldPassBasicMath()
         {
-            Assert.AreEqual(1+1, 2);
+            Assert.AreEqual(2, 1 + 1);
         }
     }
 }

@@ -1,148 +1,192 @@
 ﻿﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
-namespace generator
+
+namespace TextGenerator
 {
-    public abstract class Generator
+    public abstract class TokenGenerator
     {
-        protected List<string> tokens = new List<string>();
-        protected List<double> weights = new List<double>();
-        protected List<double> upper_bounds = new List<double>();
-        protected double sum;
-        protected Random random = new Random();
+        protected readonly List<string> _tokens = new List<string>();
+        protected readonly List<double> _weights = new List<double>();
+        protected readonly List<double> _cumulativeWeights = new List<double>();
+        protected double _totalWeight;
+        protected readonly Random _random = new Random();
 
-        public double Sum { get { return sum; } }
-        public string getToken()
+        public double TotalWeight => _totalWeight;
+        
+        public int TokenCount => _tokens.Count;
+
+        public string GetRandomToken()
         {
-            var rnd = random.Next(0, (Int32)sum);
-            for (int i = 0; i < upper_bounds.Count; i++)
+            var randomValue = _random.Next(0, (int)_totalWeight);
+            
+            for (int i = 0; i < _cumulativeWeights.Count; i++)
             {
-                if (rnd <= upper_bounds[i])
+                if (randomValue <= _cumulativeWeights[i])
                 {
-                    return tokens[i];
+                    return _tokens[i];
                 }
             }
-            return "";
+            
+            return string.Empty;
         }
 
-        public int getSize()
+        public double GetTokenProbability(string token)
         {
-            return tokens.Count;
+            int index = _tokens.FindIndex(t => t == token);
+            return index >= 0 ? _weights[index] : 0;
         }
-        public double getTokenWeight(string sym) => weights[tokens.FindIndex(x => x == sym)];
     }
-    public class CharGenerator : Generator
+
+    public class CharacterGenerator : TokenGenerator
     {
-        public CharGenerator(string filename)
+        public CharacterGenerator(string dataFile)
         {
-            string path = Path.Combine(Directory.GetParent(Environment.CurrentDirectory).Parent.Parent.FullName, filename);
-            using (StreamReader reader = new StreamReader(path))
+            string fullPath = GetFullPath(dataFile);
+            
+            foreach (string line in File.ReadLines(fullPath))
             {
-                string input;
-                string[] line;
-                while ((input = reader.ReadLine()) != null)
-                {
-                    line = input.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                    int i = 0;
-                    tokens.Add(line[i + 1]);
-                    weights.Add(Double.Parse(line[2]));
-                    sum += Double.Parse(line[2]);
-                    upper_bounds.Add(sum);
-                }
+                string[] parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                
+                _tokens.Add(parts[1]);
+                double weight = double.Parse(parts[2]);
+                _weights.Add(weight);
+                
+                _totalWeight += weight;
+                _cumulativeWeights.Add(_totalWeight);
             }
         }
-    }
-    public class WordGenerator : Generator
-    {
-        public WordGenerator(string filename)
+        
+        private string GetFullPath(string relativePath)
         {
-            string path = Path.Combine(Directory.GetParent(Environment.CurrentDirectory).Parent.Parent.FullName, filename);
-            using (StreamReader reader = new StreamReader(path))
-            {
-                string input;
-                string[] line;
-                while ((input = reader.ReadLine()) != null)
-                {
-                    line = input.Replace('.', ',').Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                    tokens.Add(line[1]);
-                    weights.Add(Double.Parse(line[4]));
-                    sum += Double.Parse(line[4]);
-                    upper_bounds.Add(sum);
-                }
-            }
+            return Path.Combine(
+                Directory.GetParent(Environment.CurrentDirectory).Parent.Parent.FullName, 
+                relativePath);
         }
     }
-    class Program
+
+    public class WordGenerator : TokenGenerator
     {
-        static void BigramProcessing(string filename, string pathRes)
+        public WordGenerator(string dataFile)
         {
-            CharGenerator gen = new CharGenerator(filename);
-            SortedDictionary<string, int> stat = new SortedDictionary<string, int>();
-            string result = "";
+            string fullPath = GetFullPath(dataFile);
+            
+            foreach (string line in File.ReadLines(fullPath))
+            {
+                string[] parts = line.Replace('.', ',').Split(
+                    new[] { ' ', '\t' }, 
+                    StringSplitOptions.RemoveEmptyEntries);
+                
+                _tokens.Add(parts[1]);
+                double weight = double.Parse(parts[4]);
+                _weights.Add(weight);
+                
+                _totalWeight += weight;
+                _cumulativeWeights.Add(_totalWeight);
+            }
+        }
+        
+        private string GetFullPath(string relativePath)
+        {
+            return Path.Combine(
+                Directory.GetParent(Environment.CurrentDirectory).Parent.Parent.FullName, 
+                relativePath);
+        }
+    }
+
+    public class GeneratorStatistics
+    {
+        public static void ProcessBigrams(string inputFile, string outputDirectory)
+        {
+            var generator = new CharacterGenerator(inputFile);
+            var frequencyMap = new SortedDictionary<string, int>();
+            var generatedText = new StringBuilder();
+            
             for (int i = 0; i < 1000; i++)
             {
-                string ch = gen.getToken();
-                result += ch;
-                if (stat.ContainsKey(ch))
-                    stat[ch]++;
+                string token = generator.GetRandomToken();
+                generatedText.Append(token);
+                
+                if (frequencyMap.ContainsKey(token))
+                    frequencyMap[token]++;
                 else
-                    stat.Add(ch, 1); Console.Write(ch);
+                    frequencyMap[token] = 1;
+                
+                Console.Write(token);
             }
-            Console.Write('\n');
-
-            using (StreamWriter writer = new StreamWriter(pathRes + "gen-1.txt", false, Encoding.UTF8))
-            {
-                writer.WriteLine(result);
-            }
-
-            using (StreamWriter writer = new StreamWriter((pathRes + "graph_bi_data.txt"), true, Encoding.UTF8))
-            {
-                foreach (KeyValuePair<string, int> entry in stat)
-                {
-                    writer.WriteLine(entry.Key + " " + (entry.Value / 1000.0).ToString() + " " +
-                        ((Double)gen.getTokenWeight(entry.Key) / gen.Sum).ToString());
-                }
-            }
+            
+            Console.WriteLine();
+            
+            WriteResults(
+                Path.Combine(outputDirectory, "gen-1.txt"),
+                generatedText.ToString());
+            
+            WriteStatistics(
+                Path.Combine(outputDirectory, "graph_bi_data.txt"),
+                frequencyMap,
+                generator);
         }
 
-        static void WordProcessing(string filename, string pathRes)
+        public static void ProcessWords(string inputFile, string outputDirectory)
         {
-            WordGenerator genWord = new WordGenerator(filename);
-            SortedDictionary<string, int> statWord = new SortedDictionary<string, int>();
-            string result = "";
+            var generator = new WordGenerator(inputFile);
+            var frequencyMap = new SortedDictionary<string, int>();
+            var generatedText = new StringBuilder();
+            
             for (int i = 0; i < 1000; i++)
             {
-                string ch = genWord.getToken();
-                result += ch + " ";
-                if (statWord.ContainsKey(ch))
-                    statWord[ch]++;
+                string token = generator.GetRandomToken();
+                generatedText.Append(token).Append(' ');
+                
+                if (frequencyMap.ContainsKey(token))
+                    frequencyMap[token]++;
                 else
-                    statWord.Add(ch, 1); Console.Write(ch + " ");
+                    frequencyMap[token] = 1;
+                
+                Console.Write(token + " ");
             }
-            Console.Write('\n');
-            using (StreamWriter writer = new StreamWriter((pathRes + "gen-2.txt"), false, Encoding.UTF8))
-            {
-                writer.WriteLine(result);
-            }
-
-            using (StreamWriter writer = new StreamWriter((pathRes + "graph_word_data.txt"), true, Encoding.UTF8))
-            {
-                foreach (KeyValuePair<string, int> entry in statWord)
-                {
-                    writer.WriteLine(entry.Key + " " + (entry.Value / 1000.0).ToString() + " " +
-                        ((Double)genWord.getTokenWeight(entry.Key) / genWord.Sum).ToString());
-                }
-            }
-
+            
+            Console.WriteLine();
+            
+            WriteResults(
+                Path.Combine(outputDirectory, "gen-2.txt"),
+                generatedText.ToString());
+            
+            WriteStatistics(
+                Path.Combine(outputDirectory, "graph_word_data.txt"),
+                frequencyMap,
+                generator);
         }
 
-        static void Main(string[] args)
+        private static void WriteResults(string filePath, string content)
         {
-            string pathRes = Path.Combine(Directory.GetParent(
-                Environment.CurrentDirectory).Parent.Parent.Parent.FullName, "Results/");
-            BigramProcessing("bigrammweights.txt", pathRes);
-            WordProcessing("wordweights.txt", pathRes);
+            File.WriteAllText(filePath, content, Encoding.UTF8);
+        }
+
+        private static void WriteStatistics(
+            string filePath,
+            SortedDictionary<string, int> frequencies,
+            TokenGenerator generator)
+        {
+            var lines = frequencies.Select(pair => 
+                $"{pair.Key} {pair.Value / 1000.0} {generator.GetTokenProbability(pair.Key) / generator.TotalWeight}");
+            
+            File.WriteAllLines(filePath, lines, Encoding.UTF8);
+        }
+    }
+
+    public class Program
+    {
+        public static void Main(string[] args)
+        {
+            string resultsDirectory = Path.Combine(
+                Directory.GetParent(Environment.CurrentDirectory).Parent.Parent.Parent.FullName, 
+                "Results");
+            
+            GeneratorStatistics.ProcessBigrams("bigrammweights.txt", resultsDirectory);
+            GeneratorStatistics.ProcessWords("wordweights.txt", resultsDirectory);
         }
     }
 }
